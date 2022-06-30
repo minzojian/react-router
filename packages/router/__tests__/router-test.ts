@@ -4359,6 +4359,59 @@ describe("a router", () => {
         /^multipart\/form-data; boundary=NodeFetchFormDataBoundary[a-z0-9]+/
       );
     });
+
+    it("races actions and loaders against abort signals", async () => {
+      let loaderDfd = defer();
+      let actionDfd = defer();
+      let router = createRouter({
+        routes: [
+          {
+            index: true,
+          },
+          {
+            path: "foo",
+            loader: () => loaderDfd.promise,
+            action: () => actionDfd.promise,
+          },
+          {
+            path: "bar",
+          },
+        ],
+        hydrationData: { loaderData: { "0": null } },
+        history: createMemoryHistory(),
+      });
+
+      expect(router.state.initialized).toBe(true);
+
+      let fooPromise = router.navigate("/foo");
+      expect(router.state.navigation.state).toBe("loading");
+
+      let barPromise = router.navigate("/bar");
+
+      // This should resolve _without_ us resolving the loader
+      await fooPromise;
+      await barPromise;
+
+      expect(router.state.navigation.state).toBe("idle");
+      expect(router.state.location.pathname).toBe("/bar");
+
+      let fooPromise2 = router.navigate("/foo", {
+        formMethod: "post",
+        formData: createFormData({ key: "value" }),
+      });
+      expect(router.state.navigation.state).toBe("submitting");
+
+      let barPromise2 = router.navigate("/bar");
+
+      // This should resolve _without_ us resolving the action
+      await fooPromise2;
+      await barPromise2;
+
+      expect(router.state.navigation.state).toBe("idle");
+      expect(router.state.location.pathname).toBe("/bar");
+
+      router.dispose();
+    });
   });
 
   describe("scroll restoration", () => {
@@ -8069,7 +8122,6 @@ describe("a router", () => {
     });
 
     it("cancels awaited reused deferreds on subsequent navigations", async () => {
-      jest.setTimeout(100000);
       let shouldRevalidateSpy = jest.fn(() => false);
       let t = setup({
         routes: [
@@ -8736,7 +8788,7 @@ describe("a router", () => {
         try {
           let statePromise = query(request);
           controller.abort();
-          dfd.resolve("Nope!");
+          // This should resolve even though we never resolved the loader
           await statePromise;
         } catch (e) {
           expect(e).toMatchInlineSnapshot(`[Error: query() call aborted]`);
@@ -8762,7 +8814,7 @@ describe("a router", () => {
         try {
           let statePromise = query(request);
           controller.abort();
-          dfd.resolve("Nope!");
+          // This should resolve even though we never resolved the loader
           await statePromise;
         } catch (e) {
           expect(e).toMatchInlineSnapshot(`[Error: query() call aborted]`);
@@ -8906,7 +8958,7 @@ describe("a router", () => {
         expect(data).toBe("ERROR LOADER ERROR");
       });
 
-      it("should handle submmit error responses", async () => {
+      it("should handle submit error responses", async () => {
         let { queryRoute } = createStaticHandler({ routes: SSR_ROUTES });
         let data;
 
@@ -8933,7 +8985,7 @@ describe("a router", () => {
         try {
           let statePromise = queryRoute(request, "root");
           controller.abort();
-          dfd.resolve("Nope!");
+          // This should resolve even though we never resolved the loader
           await statePromise;
         } catch (e) {
           expect(e).toMatchInlineSnapshot(`[Error: queryRoute() call aborted]`);
@@ -8959,7 +9011,7 @@ describe("a router", () => {
         try {
           let statePromise = queryRoute(request, "root");
           controller.abort();
-          dfd.resolve("Nope!");
+          // This should resolve even though we never resolved the loader
           await statePromise;
         } catch (e) {
           expect(e).toMatchInlineSnapshot(`[Error: queryRoute() call aborted]`);
